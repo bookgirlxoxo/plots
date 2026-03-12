@@ -7,16 +7,41 @@ local runtime = {
     confirm = {},
 }
 
+for _, row in ipairs({
+    {
+        name = "plots.admin.others",
+        description = "Allows interacting with other players' claimed plots.",
+    },
+    {
+        name = "plots.admin.road",
+        description = "Allows interacting with plot roads in the managed plot world.",
+    },
+}) do
+    if not minetest.registered_privileges[row.name] then
+        minetest.register_privilege(row.name, {
+            description = row.description,
+            give_to_singleplayer = false,
+        })
+    end
+end
+
+local MAX_MULTIPLE_PRIV = 64
+for i = 1, MAX_MULTIPLE_PRIV do
+    local priv_name = "plots.multiple." .. tostring(i)
+    if not minetest.registered_privileges[priv_name] then
+        minetest.register_privilege(priv_name, {
+            description = "Allows owning up to " .. tostring(i) .. " plots.",
+            give_to_singleplayer = false,
+        })
+    end
+end
+
 local function split_words(param)
     local out = {}
     for token in tostring(param or ""):gmatch("%S+") do
         out[#out + 1] = token
     end
     return out
-end
-
-local function esc(value)
-    return minetest.formspec_escape(tostring(value or ""))
 end
 
 local function trim(s)
@@ -31,7 +56,32 @@ local function as_int(v, minv)
     return n
 end
 
-local function find_owner_plot_for_management(player)
+local function sorted_access_names(row)
+    local out = {}
+    for name, enabled in pairs(type(row) == "table" and row or {}) do
+        if enabled == true then
+            out[#out + 1] = tostring(name)
+        end
+    end
+    table.sort(out)
+    return out
+end
+
+local function join_or_dash(values)
+    if #values <= 0 then
+        return "-"
+    end
+    return table.concat(values, ", ")
+end
+
+local function plot_id_label(plot)
+    if type(PM.public_plot_id) == "function" then
+        return tostring(PM.public_plot_id(plot))
+    end
+    return tostring(as_int(plot and plot.id, 0))
+end
+
+local function require_owner_plot_for_management(player)
     if not player or not player:is_player() then
         return nil, "Player not found."
     end
@@ -40,6 +90,7 @@ local function find_owner_plot_for_management(player)
     if current and current.owner == name then
         return current
     end
+
     local ids = PM.owned_plot_ids(name)
     if #ids == 0 then
         return nil, "You do not own a plot. Use /plot create."
@@ -61,116 +112,18 @@ local function kick_target_from_plot(owner_name, plot, target_name)
     local ok = PM.kick_player_from_plot(
         target,
         plot,
-        minetest.colorize("#ff7777", "You were kicked from plot #" .. tostring(plot.id) .. ".")
+        minetest.colorize("#ff7777", "You were kicked from plot #" .. plot_id_label(plot) .. ".")
     )
     if not ok then
         return false, target .. " is not on your plot."
     end
-    return true, "Kicked " .. target .. " from plot #" .. tostring(plot.id) .. "."
+    return true, "Kicked " .. target .. " from plot #" .. plot_id_label(plot) .. "."
 end
 
 local function remove_build_access(plot, target)
     PM.set_access(plot, "add", target, false)
     PM.set_access(plot, "trust", target, false)
 end
-
-local function open_confirm(player, action, plot)
-    if not player or not player:is_player() or not plot then
-        return false
-    end
-    local pname = player:get_player_name()
-    local action_key = tostring(action or "")
-    if action_key ~= "delete" and action_key ~= "clear" then
-        return false
-    end
-    runtime.confirm[pname] = {
-        action = action_key,
-        plot_id = plot.id,
-        expires_at = os.time() + math.max(10, tonumber((PM.config or {}).confirm_ttl_seconds) or 45),
-    }
-
-    local verb = action_key == "delete" and "Delete" or "Clear"
-    local line = action_key == "delete"
-        and "Delete plot #" .. tostring(plot.id) .. " and remove ownership?"
-        or "Clear all builds in plot #" .. tostring(plot.id) .. "?"
-    local fs = table.concat({
-        "formspec_version[4]",
-        "size[7.5,4.0]",
-        "label[0.45,0.45;" .. esc(verb .. " Plot") .. "]",
-        "label[0.45,1.20;" .. esc(line) .. "]",
-        "button[0.7,2.6;2.5,0.9;plot_confirm_yes;Confirm]",
-        "button[3.5,2.6;2.5,0.9;plot_confirm_no;Cancel]",
-    })
-    minetest.show_formspec(pname, PM.formname_confirm, fs)
-    return true
-end
-
-local function close_confirm_form(pname)
-    if type(minetest.close_formspec) == "function" then
-        minetest.close_formspec(pname, PM.formname_confirm)
-        return
-    end
-    minetest.show_formspec(pname, PM.formname_confirm, "")
-end
-
-local function expire_confirm_if_needed(row)
-    if type(row) ~= "table" then
-        return nil
-    end
-    local expires_at = tonumber(row.expires_at) or 0
-    if expires_at <= os.time() then
-        return nil
-    end
-    return row
-end
-
-minetest.register_on_player_receive_fields(function(player, formname, fields)
-    if formname ~= PM.formname_confirm then
-        return false
-    end
-    if not player or not player:is_player() then
-        return true
-    end
-    local pname = player:get_player_name()
-    local row = expire_confirm_if_needed(runtime.confirm[pname])
-    runtime.confirm[pname] = nil
-    if not row then
-        return true
-    end
-    if fields.quit or fields.plot_confirm_no then
-        close_confirm_form(pname)
-        return true
-    end
-    if not fields.plot_confirm_yes then
-        return true
-    end
-    close_confirm_form(pname)
-    local plot = PM.get_plot(row.plot_id)
-    if not plot or plot.owner ~= pname then
-        minetest.chat_send_player(pname, minetest.colorize("#ff5555", "Plot changed or no longer exists."))
-        return true
-    end
-
-    if row.action == "clear" then
-        local ok, msg = PM.clear_plot(plot)
-        minetest.chat_send_player(pname, ok and msg or minetest.colorize("#ff5555", tostring(msg)))
-        return true
-    end
-    if row.action == "delete" then
-        local current = PM.plot_for_player(player)
-        if not current or current.owner ~= pname or as_int(current.id, 0) ~= as_int(plot.id, 0) then
-            minetest.chat_send_player(pname, minetest.colorize("#ff5555", "Stand inside your plot to delete it."))
-            return true
-        end
-        local ok, msg = PM.delete_plot(plot)
-        minetest.chat_send_player(pname, ok and msg or minetest.colorize("#ff5555", tostring(msg)))
-        if ok then
-            PM.kick_player_from_plot(pname, plot, "")
-        end
-        return true
-    end
-    return true
-end)
 
 local function parse_home_args(words, caller)
     local idx = 1
@@ -192,24 +145,40 @@ local function parse_home_args(words, caller)
             end
         end
     end
+
     return idx, trim(owner)
+end
+
+local function confirm_action(name, action, plot_id)
+    local ttl = math.max(10, tonumber((PM.config or {}).confirm_ttl_seconds) or 45)
+    local stamp = os.time()
+    local row = runtime.confirm[name]
+    if row and row.action == action and as_int(row.plot_id, 0) == as_int(plot_id, 0) and stamp <= as_int(row.expires_at, 0) then
+        runtime.confirm[name] = nil
+        return true
+    end
+    runtime.confirm[name] = {
+        action = action,
+        plot_id = as_int(plot_id, 0),
+        expires_at = stamp + ttl,
+    }
+    return false
 end
 
 local function command_help()
     return table.concat({
-        "/plot create",
-        "/plot auto",
-        "/plot deny <player>",
-        "/plot kick <player>",
-        "/plot delete",
-        "/plot clear",
-        "/plot add <player>",
-        "/plot trust <player>",
-        "/plot remove <player>",
-        "/plot revoke <player>",
-        "/plot h [index] [player]",
+        "/plot (create|auto|claim)",
+        "/plot info [plot_id]",
+        "/plot (h|home) [index] [player]",
         "/plot home [index] [player]",
         "/plot hid <plot_id>",
+        "/plot add <player>",
+        "/plot trust <player>",
+        "/plot (revoke|remove) <player>",
+        "/plot deny <player>",
+        "/plot kick <player>",
+        "/plot clear",
+        "/plot delete",
     }, "\n")
 end
 
@@ -231,32 +200,62 @@ minetest.register_chatcommand("plot", {
             return true, command_help()
         end
 
+        if sub == "claim" then
+            sub = "create"
+        end
+
         if sub == "create" or sub == "auto" then
             if type(PM.apply_config) == "function" then
                 PM.apply_config()
             end
+            if type(PM.schedule_unowned_pregen) == "function" then
+                PM.schedule_unowned_pregen(false)
+            end
+
             local ok, msg, plot = PM.create_plot(name)
             if not ok then
                 return false, msg
             end
-            local t_ok, t_err = PM.teleport_to_plot(player, plot, {
-                prepare_spawn = true,
-            })
-            if not t_ok then
-                return false, t_err or "Failed to teleport to new plot."
-            end
+
+            local create_rebuild_opts = {preserve_surface = false}
             if type(PM.rebuild_plot_async) == "function" then
                 PM.rebuild_plot_async(plot, function(rebuild_ok, rebuild_err)
-                    if rebuild_ok then
+                    local online = minetest.get_player_by_name(name)
+                    if not online then
+                        return
+                    end
+                    if not rebuild_ok then
+                        minetest.chat_send_player(
+                            name,
+                            minetest.colorize("#ff5555", "Plot generation failed: " .. tostring(rebuild_err or "unknown error"))
+                        )
+                        return
+                    end
+                    local t_ok, t_err = PM.teleport_to_plot(name, plot)
+                    if not t_ok then
+                        minetest.chat_send_player(
+                            name,
+                            minetest.colorize("#ff5555", "Failed to teleport to new plot: " .. tostring(t_err or "unknown error"))
+                        )
                         return
                     end
                     minetest.chat_send_player(
                         name,
-                        minetest.colorize("#ff5555", "Plot generation failed: " .. tostring(rebuild_err or "unknown error"))
+                        "Teleported to plot #" .. plot_id_label(plot) .. "."
                     )
-                end)
+                end, create_rebuild_opts)
+                return true, msg .. " Generating terrain..."
             end
-            return true, msg .. " Teleported to your plot. Generating terrain..."
+
+            local r_ok, r_err = PM.rebuild_plot(plot, create_rebuild_opts)
+            if not r_ok then
+                return false, "Plot generation failed: " .. tostring(r_err or "unknown error")
+            end
+            local t_ok, t_err = PM.teleport_to_plot(player, plot)
+            if not t_ok then
+                return false, t_err or "Failed to teleport to new plot."
+            end
+            return true, msg .. " Teleported to plot #" .. plot_id_label(plot) .. "."
         end
 
         if sub == "h" then
@@ -275,7 +274,39 @@ minetest.register_chatcommand("plot", {
             if not ok then
                 return false, err
             end
-            return true, "Teleported to plot #" .. tostring(plot.id) .. "."
+            return true, "Teleported to plot #" .. plot_id_label(plot) .. "."
+        end
+
+        if sub == "info" then
+            local plot = nil
+            local wanted = as_int(words[2], 0)
+            if wanted > 0 then
+                if type(PM.get_plot_by_public_id) == "function" then
+                    plot = PM.get_plot_by_public_id(wanted)
+                else
+                    plot = PM.get_plot(wanted)
+                end
+            else
+                plot = PM.plot_for_player(player)
+            end
+
+            if not plot then
+                if wanted <= 0 and PM.in_plot_grid_area(player:get_pos()) then
+                    return true, "this plot isnt claimed yet! claim it with /plot claim"
+                end
+                return false, "Stand in a plot or use /plot info <plot_id>."
+            end
+
+            local trusted = sorted_access_names(plot.trust)
+            local members = sorted_access_names(plot.add)
+            local denied = sorted_access_names(plot.deny)
+            return true, table.concat({
+                "ID: " .. plot_id_label(plot),
+                "Owner: " .. tostring(plot.owner or "-"),
+                "Trusted: " .. join_or_dash(trusted),
+                "Members: " .. join_or_dash(members),
+                "Denied: " .. join_or_dash(denied),
+            }, "\n")
         end
 
         if sub == "hid" then
@@ -283,7 +314,12 @@ minetest.register_chatcommand("plot", {
             if id <= 0 then
                 return false, "Usage: /plot hid <plot id>"
             end
-            local plot = PM.get_plot(id)
+            local plot = nil
+            if type(PM.get_plot_by_public_id) == "function" then
+                plot = PM.get_plot_by_public_id(id)
+            else
+                plot = PM.get_plot(id)
+            end
             if not plot then
                 return false, "Plot not found: " .. tostring(id)
             end
@@ -294,7 +330,7 @@ minetest.register_chatcommand("plot", {
             if not ok then
                 return false, err
             end
-            return true, "Teleported to plot #" .. tostring(id) .. "."
+            return true, "Teleported to plot #" .. plot_id_label(plot) .. "."
         end
 
         if sub == "delete" then
@@ -302,21 +338,29 @@ minetest.register_chatcommand("plot", {
             if not plot or plot.owner ~= name then
                 return false, "Stand inside your plot to delete it."
             end
-            open_confirm(player, "delete", plot)
-            return true, "Confirm delete in the GUI."
+            if not confirm_action(name, "delete", PM.public_plot_id(plot)) then
+                return true, "Run /plot delete again to confirm."
+            end
+            local ok, msg = PM.delete_plot(plot)
+            if ok then
+                PM.kick_player_from_plot(name, plot, "")
+            end
+            return ok, msg
         end
 
         if sub == "clear" then
-            local plot, err = find_owner_plot_for_management(player)
+            local plot, err = require_owner_plot_for_management(player)
             if not plot then
                 return false, err
             end
-            open_confirm(player, "clear", plot)
-            return true, "Confirm clear in the GUI."
+            if not confirm_action(name, "clear", PM.public_plot_id(plot)) then
+                return true, "Run /plot clear again to confirm."
+            end
+            return PM.clear_plot(plot)
         end
 
         if sub == "kick" then
-            local plot, err = find_owner_plot_for_management(player)
+            local plot, err = require_owner_plot_for_management(player)
             if not plot then
                 return false, err
             end
@@ -328,7 +372,7 @@ minetest.register_chatcommand("plot", {
             if target == "" then
                 return false, "Usage: /plot deny <player>"
             end
-            local plot, err = find_owner_plot_for_management(player)
+            local plot, err = require_owner_plot_for_management(player)
             if not plot then
                 return false, err
             end
@@ -337,7 +381,7 @@ minetest.register_chatcommand("plot", {
                 return false, set_err
             end
             PM.kick_player_from_plot(target, plot, minetest.colorize("#ff7777", "You are denied from this plot."))
-            return true, "Denied " .. target .. " from plot #" .. tostring(plot.id) .. "."
+            return true, "Denied " .. target .. " from plot #" .. plot_id_label(plot) .. "."
         end
 
         if sub == "add" then
@@ -345,7 +389,7 @@ minetest.register_chatcommand("plot", {
             if target == "" then
                 return false, "Usage: /plot add <player>"
             end
-            local plot, err = find_owner_plot_for_management(player)
+            local plot, err = require_owner_plot_for_management(player)
             if not plot then
                 return false, err
             end
@@ -353,7 +397,7 @@ minetest.register_chatcommand("plot", {
             if not ok then
                 return false, set_err
             end
-            return true, "Added " .. target .. " to plot #" .. tostring(plot.id) .. " (builds only while owner is on plot)."
+            return true, "Added " .. target .. " to plot #" .. plot_id_label(plot) .. " (builds only while owner is on plot)."
         end
 
         if sub == "trust" then
@@ -361,7 +405,7 @@ minetest.register_chatcommand("plot", {
             if target == "" then
                 return false, "Usage: /plot trust <player>"
             end
-            local plot, err = find_owner_plot_for_management(player)
+            local plot, err = require_owner_plot_for_management(player)
             if not plot then
                 return false, err
             end
@@ -369,7 +413,7 @@ minetest.register_chatcommand("plot", {
             if not ok then
                 return false, set_err
             end
-            return true, "Trusted " .. target .. " on plot #" .. tostring(plot.id) .. "."
+            return true, "Trusted " .. target .. " on plot #" .. plot_id_label(plot) .. "."
         end
 
         if sub == "remove" or sub == "revoke" then
@@ -377,15 +421,27 @@ minetest.register_chatcommand("plot", {
             if target == "" then
                 return false, "Usage: /plot " .. sub .. " <player>"
             end
-            local plot, err = find_owner_plot_for_management(player)
+            local plot, err = require_owner_plot_for_management(player)
             if not plot then
                 return false, err
             end
             remove_build_access(plot, target)
             PM.save_state()
-            return true, "Revoked build access for " .. target .. " on plot #" .. tostring(plot.id) .. "."
+            return true, "Revoked build access for " .. target .. " on plot #" .. plot_id_label(plot) .. "."
         end
 
         return false, "Unknown subcommand. Use /plot for help."
+    end,
+})
+
+minetest.register_chatcommand("p", {
+    params = "<subcommand>",
+    description = "Alias for /plot",
+    func = function(name, param)
+        local cmd = minetest.registered_chatcommands and minetest.registered_chatcommands.plot
+        if not cmd or type(cmd.func) ~= "function" then
+            return false, "Plot command is unavailable."
+        end
+        return cmd.func(name, param)
     end,
 })

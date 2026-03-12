@@ -1,60 +1,42 @@
 # plots
 
-Plot world system for Luanti, inspired by PlotSquared-style plot management.
+A plot world system for Luanti inspired by 'PlotSquared' for Minecraft.
 
-This mod creates build plots in a separate area, teleports players to owned plots, and enforces plot-based protection/access rules.
+## What It Does
 
-## Requirements
+- Lets players claim plots to build on.
+- Plot protection + access lists (`add`, `trust`, `deny`).
+- Multi-plot limits via privilege `plots.multiple.<number>`
+- Admin privileges: `plots.admin.others` (interact with others' claimed plots), `plots.admin.road` (interact with roads).
 
-- `default`
+File: `data/config.json`
 
-## Configuration
+## Notable options
 
-Configuration is loaded from:
-
-`data/config.json`
-
-### Config Fields
-
-- `max_plots_per_player`: Max owned plots per player.
-- `plot_size`: Plot diameter/width used by layout logic.
-- `plot_gap`: Gap between neighboring plot cells.
-- `shape`: `square` or `sphere`.
-- `grid_columns`: Number of columns before wrapping to next row.
-- `origin`: Grid anchor position (`x`, `y`, `z`).
-- `spawn`: Global safe spawn used for denied/kicked players.
-- `dimension`: Allowed plot world Y-range (`y_min`, `y_max`).
-- `build_height`: Vertical build height above plot center.
-- `build_depth`: Vertical depth below plot center used by terrain/protection bounds.
-- `floor_node`: Fallback floor node for safe teleport pads.
-- `wall_node`: Border/void wall node (defaults to `plots:void`).
-- `terrain_top_node`, `terrain_dirt_node`, `terrain_stone_node`: Terrain regeneration nodes.
-- `terrain_grass_plant_chance`: Chance to place grass decorations on regenerated terrain.
-- `border_enabled`: Enable perimeter wall/border logic.
-- `confirm_ttl_seconds`: Confirm GUI timeout for destructive actions.
-- `deny_check_interval`: Seconds between deny enforcement checks.
+- `plot_size`: buildable plot width/length.
+- `plot_gap`: road/gap space between plots.
+- `shape`: plot shape (`square` or `sphere`).
+- `grid_world_size`: total managed plot-world size.
+- `origin`: center point of the plot grid.
+- `dimension`: Y-range where plots/protection are active.
+- `max_plots_per_player`: default claim limit (before privileges).
+- `road_node`: road block material.
+- `unowned_plot_node`: fill block for unclaimed plots.
+- `floor_node`: base floor block used by plot generation.
 
 ## Commands
 
-Use `/plot` to print help.
-
-- `/plot create`
-- `/plot auto`
-- `/plot deny <player>`
-- `/plot kick <player>`
-- `/plot delete`
-- `/plot clear`
-- `/plot add <player>`
-- `/plot trust <player>`
-- `/plot remove <player>`
-- `/plot revoke <player>`
-- `/plot h [index] [player]`
+- `/plot (create|auto|claim)`
+- `/plot info [plot_id]`
+- `/plot (h|home) [index] [player]`
 - `/plot home [index] [player]`
 - `/plot hid <plot_id>`
+- `/plot add <player>`
+- `/plot trust <player>`
+- `/plot (revoke|remove) <player>`
+- `/plot deny <player>`
+- `/plot kick <player>`
+- `/plot clear` (run twice to confirm)
+- `/plot delete` (run twice to confirm)
 
-## Access Rules
-
-- Owner can always build on own plot.
-- `trust`: player can build anytime.
-- `add`: player can build only while owner is physically on that plot.
-- `deny`: player cannot visit/build and is periodically kicked out.
+- `/p ...` (alias for `/plot ...`)

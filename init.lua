@@ -8,11 +8,15 @@ PM.storage = PM.storage or minetest.get_mod_storage()
 PM.formname_confirm = PM.formname_confirm or "plots:confirm"
 rawset(_G, "plots_mod", PM)
 
-if not minetest.registered_nodes["plots:void"] then
-    minetest.register_node("plots:void", {
-        description = "Plot Void Block",
-        tiles = {"void.png"},
+local function register_locked_plot_node(name, description, texture)
+    if minetest.registered_nodes[name] then
+        return
+    end
+    minetest.register_node(name, {
+        description = description,
+        tiles = {texture},
         groups = {unbreakable = 1, not_in_creative_inventory = 1},
+        pointable = false,
         drop = "",
         can_dig = function()
             return false
@@ -21,6 +25,9 @@ if not minetest.registered_nodes["plots:void"] then
         end,
     })
 end
+
+register_locked_plot_node("plots:claimed", "Claimed Plot Border", "claimed.png")
+register_locked_plot_node("plots:unclaimed", "Unclaimed Plot Border", "unclaimed.png")
 
 for _, rel in ipairs({
     "lib/core.lua",

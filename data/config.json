@@ -1,32 +1,36 @@
 {
-  "max_plots_per_player": 1,
   "plot_size": 48,
   "plot_gap": 14,
   "shape": "square",
-  "grid_columns": 64,
+  "grid_world_size": 2000,
+  "pregenerate_plot_count": 256,
+  "pregenerate_batch_size": 16,
   "origin": {
-    "x": 4000,
+    "x": 0,
     "y": 6000,
-    "z": 4000
+    "z": 0
   },
   "spawn": {
-    "x": 4000,
+    "x": 0,
     "y": 6002,
-    "z": 4000
+    "z": 0
   },
+  "spawn_mode": "center",
   "dimension": {
     "y_min": 5840,
     "y_max": 6240
   },
   "build_height": 96,
   "build_depth": 32,
+  "border_enabled": true,
+  "max_plots_per_player": 1,
   "floor_node": "default:stone",
-  "wall_node": "plots:void",
   "terrain_top_node": "default:dirt_with_grass",
   "terrain_dirt_node": "default:dirt",
   "terrain_stone_node": "default:stone",
   "terrain_grass_plant_chance": 0.13,
-  "border_enabled": true,
+  "road_node": "default:stonebrick",
+  "unowned_plot_node": "default:dirt_with_grass",
   "confirm_ttl_seconds": 45,
   "deny_check_interval": 1.0
 }
