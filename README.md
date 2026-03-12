@@ -29,7 +29,6 @@ File: `data/config.json`
 - `/plot (create|auto|claim)`
 - `/plot info [plot_id]`
 - `/plot (h|home) [index] [player]`
-- `/plot home [index] [player]`
 - `/plot hid <plot_id>`
 - `/plot add <player>`
 - `/plot trust <player>`
