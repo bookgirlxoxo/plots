@@ -17,6 +17,7 @@ local as_int = C.as_int
 local ensure_player_name = C.ensure_player_name
 local sanitize_shape = C.sanitize_shape
 local ensure_access_table = C.ensure_access_table
+local player_exists = C.player_exists
 local layout_info = C.layout_info
 local pregenerate_plot_count = C.pregenerate_plot_count
 local center_for_plot_id = C.center_for_plot_id
@@ -180,6 +181,55 @@ function PM.delete_plot(plot_or_id)
     return true, "Deleted plot #" .. tostring(PM.public_plot_id(plot)) .. "."
 end
 
+function PM.transfer_plot_owner(plot_or_id, new_owner_name)
+    local plot = type(plot_or_id) == "table" and plot_or_id or PM.get_plot(plot_or_id)
+    if not plot then
+        return false, "Plot not found."
+    end
+
+    local id = as_int(plot.id, 0)
+    if id <= 0 then
+        return false, "Invalid plot id."
+    end
+
+    local old_owner = ensure_player_name(plot.owner)
+    if old_owner == "" then
+        return false, "Invalid current owner."
+    end
+
+    local new_owner = ensure_player_name(new_owner_name)
+    if new_owner == "" then
+        return false, "Invalid player."
+    end
+    if not minetest.get_player_by_name(old_owner) or not minetest.get_player_by_name(new_owner) then
+        return false, "Both players must be online."
+    end
+    if type(player_exists) == "function" and not player_exists(new_owner) then
+        return false, "Player does not exist."
+    end
+    if new_owner == old_owner then
+        return false, "You cannot target the plot owner."
+    end
+
+    local max_count = math.max(1, as_int(PM.get_max_plots_per_player(new_owner), 1))
+    local owned = PM.owned_plot_ids(new_owner)
+    if #owned > 0 or #owned >= max_count then
+        return false, "User has no plots available"
+    end
+
+    normalize_access(plot)
+    remove_plot_ref(old_owner, id)
+    save_plot_ref(new_owner, id)
+
+    plot.owner = new_owner
+    plot.add[new_owner] = nil
+    plot.trust[new_owner] = nil
+    plot.deny[new_owner] = nil
+
+    PM.save_state()
+    return true, "Transferred plot #" .. tostring(PM.public_plot_id(plot)) .. " to " .. new_owner .. "."
+end
+
 function PM.set_access(plot, mode, target_name, enabled)
     if not plot then
         return false, "Plot not found."
@@ -191,6 +241,9 @@ function PM.set_access(plot, mode, target_name, enabled)
     local target = ensure_player_name(target_name)
     if target == "" then
         return false, "Invalid player."
+    end
+    if type(player_exists) == "function" and not player_exists(target) then
+        return false, "Player does not exist."
     end
     if target == plot.owner then
         return false, "You cannot target the plot owner."
@@ -228,11 +281,46 @@ function PM.set_access(plot, mode, target_name, enabled)
     return true
 end
 
-local function safe_spawn_for_kick(player)
-    local spawn = PM.get_plot_spawn_pos()
-    local floor_node = trim((PM.config or {}).floor_node)
+local function kick_spawn_pos(source_plot)
+    local candidates = {}
+    if type(source_plot) == "table" and type(source_plot.center) == "table" then
+        local center = source_plot.center
+        local radius = math.max(4, as_int(PM.plot_radius(source_plot), 4))
+        local edge = radius + 2
+        local y = as_int(PM.plot_surface_y(source_plot), as_int(center.y, 0)) + 1
+        candidates[#candidates + 1] = {x = center.x + edge, y = y, z = center.z}
+        candidates[#candidates + 1] = {x = center.x - edge, y = y, z = center.z}
+        candidates[#candidates + 1] = {x = center.x, y = y, z = center.z + edge}
+        candidates[#candidates + 1] = {x = center.x, y = y, z = center.z - edge}
+    end
+
+    local fallback = PM.get_plot_spawn_pos()
+    candidates[#candidates + 1] = fallback
+
+    if type(PM.is_road_pos) == "function" then
+        for _, pos in ipairs(candidates) do
+            if PM.is_road_pos(pos) then
+                return {
+                    x = as_int(pos.x, 0),
+                    y = as_int(pos.y, 0),
+                    z = as_int(pos.z, 0),
+                }
+            end
+        end
+    end
+
+    return {
+        x = as_int(fallback.x, 0),
+        y = as_int(fallback.y, 0),
+        z = as_int(fallback.z, 0),
+    }
+end
+
+local function safe_spawn_for_kick(player, source_plot)
+    local spawn = kick_spawn_pos(source_plot)
+    local floor_node = trim((PM.config or {}).road_node)
     if floor_node == "" or not minetest.registered_nodes[floor_node] then
-        floor_node = "default:stone"
+        floor_node = "default:stonebrick"
     end
     for dx = -1, 1 do
         for dz = -1, 1 do
@@ -253,7 +341,7 @@ function PM.kick_player_from_plot(target_name, source_plot, reason)
     if source_plot and not pos_in_plot_shape(source_plot, pos) then
         return false
     end
-    safe_spawn_for_kick(target)
+    safe_spawn_for_kick(target, source_plot)
     local msg = trim(reason)
     if msg ~= "" then
         minetest.chat_send_player(target:get_player_name(), msg)

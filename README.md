@@ -34,9 +34,11 @@ File: `data/config.json`
 - `/plot add <player>`
 - `/plot trust <player>`
 - `/plot (revoke|remove) <player>`
+- `/plot undeny <player>`
 - `/plot deny <player>`
 - `/plot kick <player>`
-- `/plot clear` (run twice to confirm)
-- `/plot delete` (run twice to confirm)
+- `/plot transfer <player>`
+- `/plot clear`
+- `/plot delete`
 
 - `/p ...` (alias for `/plot ...`)

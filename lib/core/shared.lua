@@ -114,6 +114,27 @@ local function player_has_plot_admin_road(player_name)
     return player_has_priv(player_name, "plots.admin.road")
 end
 
+local function player_exists(player_or_name)
+    local player_name = ensure_player_name(player_or_name)
+    if player_name == "" then
+        return false
+    end
+
+    if type(minetest.player_exists) == "function" then
+        return minetest.player_exists(player_name) == true
+    end
+
+    if minetest.get_player_by_name(player_name) then
+        return true
+    end
+
+    local handler = minetest.get_auth_handler and minetest.get_auth_handler()
+    if not handler or not handler.get_auth then
+        return false
+    end
+    return type(handler.get_auth(player_name)) == "table"
+end
+
 local function read_text(path)
     local file, err = io.open(path, "r")
     if not file then
@@ -136,4 +157,5 @@ C.get_player_priv_table = get_player_priv_table
 C.player_has_priv = player_has_priv
 C.player_has_plot_admin_others = player_has_plot_admin_others
 C.player_has_plot_admin_road = player_has_plot_admin_road
+C.player_exists = player_exists
 C.read_text = read_text
